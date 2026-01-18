@@ -3,22 +3,45 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
 android {
-    signingConfigs {
+signingConfigs {
         release {
-            keyAlias 'fdroid'
-            storeFile file('.config/android/roundsync.keystore')
+            // 1. GITHUB ACTIONS (CI)
+            // Check if environment variables for signing exist
+            if (System.getenv("CMD_RELEASE_KEYSTORE") != null) {
+                storeFile file(System.getenv("CMD_RELEASE_KEYSTORE"))
+                storePassword System.getenv("CMD_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CMD_RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("CMD_RELEASE_KEY_PASSWORD")
+            }
+            // 2. LOCAL COMPILATION (PC)
+            // If not on CI, look for the keystore.properties file in the root
+            else {
+                def keystorePropertiesFile = rootProject.file("keystore.properties")
+                if (keystorePropertiesFile.exists()) {
+                    def props = new Properties()
+                    props.load(new FileInputStream(keystorePropertiesFile))
+                    
+                    // Verify that the key file indicated in the properties exists
+                    if (props['storeFile'] && file(props['storeFile']).exists()) {
+                        storeFile file(props['storeFile'])
+                        storePassword props['storePassword']
+                        keyAlias props['keyAlias']
+                        keyPassword props['keyPassword']
+                    }
+                }
+            }
         }
     }
     ndkVersion project.properties['de.felixnuesse.extract.ndkVersion']
     defaultConfig {
         generatedDensities = []
         vectorDrawables.generatedDensities = []
-        applicationId 'de.felixnuesse.extract'
+        applicationId 'my.tmatzxzone.roundsync'
         minSdkVersion 23
-        compileSdk 34
-        targetSdkVersion 34
+        compileSdk 35
+        targetSdkVersion 35
         versionCode 410 // last digit is reserved for ABI, only ever end on 0!
-        versionName '2.5.6'
+        versionName '2.5.7'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";

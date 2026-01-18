@@ -1,16 +1,20 @@
-name: Android CI Signed
+name: Android Release Build
 
 on:
   push:
-  workflow_dispatch:
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-signed:
+  build-release:
     runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write  # Required to create releases and upload assets
 
     # Make variables available to the entire job
     env:
@@ -22,6 +26,33 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Extract version from tag and update build.gradle
+        id: get_version
+        run: |
+          # Remove 'v' prefix from tag to get version
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+          
+          # Extract current version info from build.gradle
+          GRADLE_VERSION=$(grep -E "^\s*versionName\s+" app/build.gradle | sed -E "s/.*versionName\s+'([^']+)'.*/\1/")
+          GRADLE_VERSION_CODE=$(grep -E "^\s*versionCode\s+" app/build.gradle | sed -E 's/.*versionCode\s+([0-9]+).*/\1/')
+          echo "Current Gradle versionName: ${GRADLE_VERSION}"
+          echo "Current Gradle versionCode: ${GRADLE_VERSION_CODE}"
+          
+          # Update versionName in build.gradle to match tag version
+          if [ "${VERSION}" != "${GRADLE_VERSION}" ]; then
+            echo "Updating versionName from '${GRADLE_VERSION}' to '${VERSION}'"
+            sed -i "s/versionName '[^']*'/versionName '${VERSION}'/" app/build.gradle
+            
+            # Verify the update
+            NEW_VERSION=$(grep -E "^\s*versionName\s+" app/build.gradle | sed -E "s/.*versionName\s+'([^']+)'.*/\1/")
+            echo "Updated versionName to: ${NEW_VERSION}"
+          else
+            echo "✓ Version already matches tag"
+          fi
 
       - name: Read versions from gradle.properties
         run: |
@@ -89,42 +120,25 @@ jobs:
         run: |
           ./gradlew assembleOssRelease --stacktrace
 
-      - name: Upload APK (Universal)
-        uses: actions/upload-artifact@v4
-        with:
-          name: round-sync-universal
-          path: app/build/outputs/apk/oss/release/*-oss-universal-release.apk
-          if-no-files-found: warn
-          retention-days: 1
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release-artifacts
+          
+          # Copy APK files with version-specific names
+          cp app/build/outputs/apk/oss/release/*-oss-universal-release.apk release-artifacts/roundsync-${VERSION}-universal.apk
+          cp app/build/outputs/apk/oss/release/*-oss-arm64-v8a-release.apk release-artifacts/roundsync-${VERSION}-arm64-v8a.apk
+          cp app/build/outputs/apk/oss/release/*-oss-armeabi-v7a-release.apk release-artifacts/roundsync-${VERSION}-armeabi-v7a.apk
+          cp app/build/outputs/apk/oss/release/*-oss-x86-release.apk release-artifacts/roundsync-${VERSION}-x86.apk
+          cp app/build/outputs/apk/oss/release/*-oss-x86_64-release.apk release-artifacts/roundsync-${VERSION}-x86_64.apk
+          
+          echo "Release artifacts prepared:"
+          ls -lh release-artifacts/
 
-      - name: Upload APK (Arm64)
-        uses: actions/upload-artifact@v4
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: round-sync-arm64
-          path: app/build/outputs/apk/oss/release/*-oss-arm64-v8a-release.apk
-          if-no-files-found: warn
-          retention-days: 1
-
-      - name: Upload APK (Armv7)
-        uses: actions/upload-artifact@v4
-        with:
-          name: round-sync-armeabi
-          path: app/build/outputs/apk/oss/release/*-oss-armeabi-v7a-release.apk
-          if-no-files-found: warn
-          retention-days: 1
-
-      - name: Upload APK (x86)
-        uses: actions/upload-artifact@v4
-        with:
-          name: round-sync-x86
-          path: app/build/outputs/apk/oss/release/*-oss-x86-release.apk
-          if-no-files-found: warn
-          retention-days: 1
-
-      - name: Upload APK (x86_64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: round-sync-x64
-          path: app/build/outputs/apk/oss/release/*-oss-x86_64-release.apk
-          if-no-files-found: warn
-          retention-days: 1
+          files: release-artifacts/*.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
